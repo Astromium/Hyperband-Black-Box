@@ -23,7 +23,10 @@ X = scaler.fit_transform(X)
 
 X_test, y_test = X[143046:], y[143046:]
 
-print('y_test example', y_test[0])
+# get only the malicious examples
+botnet_idx = np.where(y_test == 1)[0]
+X_test_botnet, y_test_botnet = X_test[botnet_idx], y_test[botnet_idx]
+
 
 # load the model
 model = tf.keras.models.load_model('./ressources/model_botnet.h5')
@@ -34,21 +37,25 @@ mutables = metadata.index[metadata['mutable'] == True].tolist()
 
 #print('mutables', mutables)
 
-def scoring_func(clf, config, budget, x_clean, y_clean, eps, distance):
+def scoring_func(clf, config, budget, x_clean, y_clean, eps, distance, min_max_constraints):
      
     score = 0.0
     adv = np.array(x_clean)
     for _ in range(budget):
         perturbation = generate_perturbation(shape=np.array(config).shape, epsilon=eps, distance=distance)
         adv[0][list(config)] += perturbation
+
+        #clipping to (0,1) because data is scaled:
+        adv[0] = np.clip(adv[0], 0, 1)
+
         
         pred = softmax(clf.predict(adv))
         score += pred[0][y_clean]
         
     return round(score / budget, 3), adv
 
-BATCH_SIZE = 64
-eps = 0.2
+BATCH_SIZE = X_test_botnet.shape[0]
+eps = 0.05
 distance = 'l2'
 
 dimensions = X_test.shape[1]
@@ -68,10 +75,10 @@ if __name__ == "__main__":
             dimensions=dimensions,
             max_config_size=len(mutables)-1,
             distance=distance,
-            downsample=2
+            downsample=3
         )
     
-        all_scores, all_configs, all_checkpoints = hp.run(mutables=mutables)
+        all_scores, all_configs, all_checkpoints = hp.run(mutables=mutables, min_max_constraints=(0,1))
 
         scores.append(all_scores)
         configs.append(all_configs)

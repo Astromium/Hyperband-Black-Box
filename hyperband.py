@@ -32,7 +32,7 @@ class Hyperband():
         self.random_seed = random_seed
         self.distance = distance
     
-    def run(self, mutables=None):
+    def run(self, mutables=None, min_max_constraints=None):
         
         if self.downsample <= 1:
             raise ValueError('Downsample must be > 1; otherwise, the number of resources allocated' +
@@ -93,7 +93,7 @@ class Hyperband():
                         random_seed=self.random_seed,
                         progress_bar=progress_bar,
                 )
-            scores, configurations, checkpoints = sh.run(mutables=mutables)
+            scores, configurations, checkpoints = sh.run(mutables=mutables, min_max_constraints=min_max_constraints)
             
             logger.info('Finished hyperband round: %d of %d', n_hyperband_rounds - i - 1,
                         n_hyperband_rounds - 1)

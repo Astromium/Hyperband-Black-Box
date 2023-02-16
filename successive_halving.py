@@ -26,7 +26,7 @@ class SuccessiveHalving():
         self.config_sampler = config_sampler
         self.distance = distance
         
-    def run(self, mutables):
+    def run(self, mutables, min_max_constraints):
         if self.downsample <= 1:
             raise ValueError('Downsample must be > 1; otherwise, the number of resources allocated' +
                          'does not grow')
@@ -67,7 +67,7 @@ class SuccessiveHalving():
             print(f"Budget is {budget}")
 
             for score, checkpoint, config in zip(scores, checkpoints, configurations):
-                new_score, new_checkpoint = self.objective(self.clf, config, budget, self.x_clean, self.y_clean, self.eps, self.distance)
+                new_score, new_checkpoint = self.objective(self.clf, config, budget, self.x_clean, self.y_clean, self.eps, self.distance, min_max_constraints)
                 if new_score < score:
                         #new_score = min(score, new_score)
                     results.append(tuple([new_score, new_checkpoint]))
