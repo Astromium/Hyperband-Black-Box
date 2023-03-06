@@ -2,12 +2,12 @@ import numpy as np
 import warnings
 import pandas as pd
 from utils.generate_perturbation import generate_perturbation
-from utils.calculate_sr import calculate_sr
+from utils.calculate_sr import calculate_sr_url_rf
 from utils.config_sampler import config_sampler
+from hyperband import Hyperband
 
 warnings.filterwarnings(action='ignore')
 
-from hyperband import Hyperband
 
 
 def scoring_func(clf, config, budget, x_clean, y_clean, eps, distance, min_max_constraints):
@@ -28,15 +28,20 @@ def scoring_func(clf, config, budget, x_clean, y_clean, eps, distance, min_max_c
     adv = np.array(x_clean)
     for _ in range(budget):
         perturbation = generate_perturbation(shape=np.array(config).shape, epsilon=eps, distance=distance)
-        adv[0][list(config)] += perturbation
+        adv[list(config)] += perturbation
+
+        # projecting into Lp-ball
+        if distance == 'inf':
+            adv = np.clip(adv, -eps, eps)
+        elif distance == 'l2':
+            adv = adv / max(eps, np.linalg.norm(adv))
 
         # clip if min_max_constraints
         if min_max_constraints:
-            min_constraints, max_constraints = min_max_constraints[0], min_max_constraints[1]
-            adv[0] = np.clip(adv[0], min_constraints, max_constraints)
+            adv = np.clip(adv, min_max_constraints[0], min_max_constraints[1])
 
         
-        pred = clf.predict_proba(adv)
+        pred = clf.predict_proba(adv[np.newaxis, :])
         score += pred[0][y_clean]
 
     return round(score / budget, 3), adv
@@ -45,8 +50,8 @@ import joblib
 import numpy as np
 from sklearn.pipeline import Pipeline
 
-x_clean = np.load("./ressources/baseline_X_test_candidates.npy")[:10]
-y_clean = np.load("./ressources/baseline_y_test_candidates.npy")[:10]
+x_clean = np.load("./ressources/baseline_X_test_candidates.npy")[:50]
+y_clean = np.load("./ressources/baseline_y_test_candidates.npy")[:50]
 
 model = joblib.load("./ressources/baseline_rf.model")
 preprocessing_pipeline = joblib.load("./ressources/baseline_scaler.joblib")
@@ -72,15 +77,15 @@ scores = []
 configs = []
 checkpoints = []
 start = timeit.default_timer()
-batch = 30
+batch = 50
 
 if __name__ == '__main__':
 
     distance = 'inf'
-    eps = 0.2
+    eps = 0.1
 
     for i in range(batch):
-        x = x_clean[i].reshape(1, -1)
+        x = x_clean[i]
         hp = Hyperband(
             objective=scoring_func,
             clf=model_pipeline,
@@ -88,8 +93,8 @@ if __name__ == '__main__':
             y_clean=y_clean[i],
             config_sampler=config_sampler,
             eps=eps,
-            dimensions=x.shape[1],
-            max_config_size=x.shape[1]-1,
+            dimensions=x.shape[0],
+            max_config_size=x.shape[0]-1,
             distance=distance,
             downsample=2
         )
@@ -104,7 +109,7 @@ if __name__ == '__main__':
 
  
 
-    success_rate, adversarials = calculate_sr(model=model_pipeline, labels=y_clean[:batch], scores=np.array(scores), checkpoints=checkpoints)
+    success_rate = calculate_sr_url_rf(model=model_pipeline, data=x_clean[:batch], labels=y_clean[:batch], scores=np.array(scores), checkpoints=checkpoints)
 
     print(f'execution time = {(end - start) / 60}')
     print(f'success rate = {success_rate * 100}%')

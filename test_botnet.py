@@ -2,10 +2,10 @@ import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 from mlc.datasets.dataset_factory import get_dataset
 from hyperband import Hyperband
-from utils.calculate_sr import calculate_sr
+from utils.calculate_sr import calculate_sr_botnet
 from utils.config_sampler import config_sampler
 from utils.generate_perturbation import generate_perturbation
 from scipy.special import softmax
@@ -18,7 +18,7 @@ X, y = ds.get_x_y()
 metadata = ds.get_metadata()
 
 # scaling 
-scaler = StandardScaler()
+scaler = MinMaxScaler()
 X = scaler.fit_transform(X)
 
 X_test, y_test = X[143046:], y[143046:]
@@ -43,18 +43,24 @@ def scoring_func(clf, config, budget, x_clean, y_clean, eps, distance, min_max_c
     adv = np.array(x_clean)
     for _ in range(budget):
         perturbation = generate_perturbation(shape=np.array(config).shape, epsilon=eps, distance=distance)
-        adv[0][list(config)] += perturbation
+        adv[list(config)] += perturbation
 
-        #clipping to (0,1) because data is scaled:
-        adv[0] = np.clip(adv[0], 0, 1)
+        # projecting into the Lp-ball
+        if distance == 'inf':
+            adv = np.clip(adv, -eps, eps)
+        elif distance == 'l2':
+            adv = adv / max(eps, np.linalg.norm(adv))
+
+        # clipping to min-max values (0-1 because data is scaled)
+        adv = np.clip(adv, 0, 1)
 
         
-        pred = softmax(clf.predict(adv))
+        pred = softmax(clf.predict(adv.reshape(1, -1)))
         score += pred[0][y_clean]
         
     return round(score / budget, 3), adv
 
-BATCH_SIZE = X_test_botnet.shape[0]
+BATCH_SIZE = 100  # X_test_botnet.shape[0]
 eps = 0.05
 distance = 'l2'
 
@@ -68,7 +74,7 @@ if __name__ == "__main__":
         hp = Hyperband(
             objective=scoring_func,
             clf=model,
-            x_clean=X_test[i].reshape(1, -1),
+            x_clean=X_test[i],
             y_clean=y_test[i],
             config_sampler=config_sampler,
             eps=eps,
@@ -85,7 +91,7 @@ if __name__ == "__main__":
         checkpoints.append(all_checkpoints)
     end = timeit.default_timer()
 
-    sr, adv = calculate_sr(model=wrapped_model, labels=y_test[:BATCH_SIZE], scores=np.array(scores), checkpoints=checkpoints)
+    sr = calculate_sr_botnet(model=model, data=X_test_botnet[:BATCH_SIZE], labels=y_test_botnet[:BATCH_SIZE], scores=np.array(scores), checkpoints=checkpoints)
 
     print(f'Execution time {(end - start) / 60}')
     print(f'Success rate over {BATCH_SIZE} examples {sr * 100}')
